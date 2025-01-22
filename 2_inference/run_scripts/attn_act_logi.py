@@ -6,8 +6,6 @@ import logging
 import torch
 import argparse
 from transformers import AutoTokenizer, AutoModelForCausalLM
-
-# It is assumed you will also import load_model from load_model.py
 from load_model import load_model
 
 # Default parameters
@@ -142,7 +140,6 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, default=DEFAULT_BATCH_SIZE)
     parser.add_argument("--max_seq_length", type=int, default=DEFAULT_MAX_SEQ_LENGTH)
     parser.add_argument("--top_k_logits", type=int, default=DEFAULT_TOP_K_LOGITS)
-    # In a real job, you might also pass paths to your data file and model parameters.
     args = parser.parse_args()
 
     # Setup a basic logger if needed
