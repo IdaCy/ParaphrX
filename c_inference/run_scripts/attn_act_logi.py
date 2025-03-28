@@ -6,7 +6,7 @@ import logging
 import torch
 import argparse
 from transformers import AutoTokenizer, AutoModelForCausalLM
-from load_model import load_model
+from b_utils.run_scripts.load_model.py import load_model
 
 # Default parameters
 DEFAULT_OUTPUT_DIR = "output/"
