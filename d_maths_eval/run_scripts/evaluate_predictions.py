@@ -5,8 +5,8 @@ import torch
 from glob import glob
 import argparse
 
-# Import the parsing function from the separate module.
-from collab_modules.parse_prediction_text import parse_prediction_text
+# Import the parsing function from the separate module
+from d_maths_eval.run_scripts.parse_predictions import parse_prediction_text
 
 # Default parameters
 DEFAULT_PT_FILE = "output/extractions/gemma2bit/normal"
