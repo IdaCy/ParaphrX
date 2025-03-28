@@ -153,22 +153,33 @@ You’ll need to provide your own paraphrased prompt data. Some typical workflow
 Structure initially:
 
 ```
-ParaInterpML/
-├── data/
-│   ├── polite_prompts.json
-│   └── urgent_prompts.json
-├── outputs/
-│   ├── polite_run/
-│   │   ├── activations_00000_00004.pt
-│   │   ├── ...
-│   └── urgent_run/
-├── results/
-│   ├── polite_scores.csv
-│   ├── polite_aggregates.json
-│   ├── polite_aggregates.txt
-│   └── ...
-├── inference.py
-├── score_scripts.py
+ParaphrX/
+├── 0_data/
+│   ├── maths.json         <- put your JSON here
+│   └── instructions.json
+├── 1_utils/
+│   ├── hpc/
+│   └── run_scripts/       <- always useful scripts
+│       ├── load_json.py
+│       ├── load_model.py
+│       ├── logger.py
+│       └── read_predictions.py
+├── 2_inference/
+│   ├── hpc/
+│   └── run_scripts/
+│       └── attn_act_logi.py
+├── 3_maths_eval/
+│   ├── hpc/
+│   └── run_scripts/
+│       ├── parse_predictions.py
+│       └── evaluate_predictions.py
+├── 4_semantics_eval/
+│   ├── hpc/
+│   └── run_scripts/
+├── 5_attention_fractions/
+│   ├── hpc/
+│   └── run_scripts/
+│       └── dirs_eval.py
 ├── requirements.txt
 └── README.md
 ```
