@@ -45,7 +45,8 @@ def load_features_from_dir(directory, layer, aggregation="mean"):
             raise ValueError("Unsupported aggregation method")
         
         # Convert to numpy array and append per sample
-        all_features.append(features.numpy())
+        #all_features.append(features.numpy())
+        all_features.append(features.float().numpy())
     
     if len(all_features) == 0:
         raise ValueError(f"No features loaded from {directory} for layer {layer}")
