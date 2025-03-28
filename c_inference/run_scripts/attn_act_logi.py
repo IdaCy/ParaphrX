@@ -54,7 +54,7 @@ def run_inf(model,
 
     total_samples = len(data)
     total_batches = math.ceil(total_samples / batch_size)
-    logger.info(f"=== Starting inference. #samples={total_samples}, batch_size={batch_size} ===")
+    logger.warning(f"=== Starting inference. #samples={total_samples}, batch_size={batch_size} ===")
 
     for batch_idx in range(total_batches):
         start_i = batch_idx * batch_size
@@ -132,7 +132,7 @@ def run_inf(model,
         except Exception as ex:
             logger.exception(f"Error on batch {batch_idx}: {ex}")
 
-    logger.info("=== Inference Complete ===")
+    logger.warning("=== Inference Complete ===")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run inference on a dataset.")
