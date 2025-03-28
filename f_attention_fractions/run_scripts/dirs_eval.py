@@ -30,16 +30,8 @@ def get_default_config(prep_model, prep_dir=None, all_prompt_types=None):
     output_dir = os.path.join("output", "attention", prep_model, all_dirs_joined)
     os.makedirs(output_dir, exist_ok=True)
     
-    # Read specific_words from CSV (assumes CSV exists)
-    specific_words_csv = os.path.join("analyses", "specific_words.csv")
-    if os.path.exists(specific_words_csv):
-        with open(specific_words_csv, "r", encoding="utf-8") as f:
-            specific_words = [line.strip() for line in f if line.strip()]
-    else:
-        specific_words = []
-    
-    # Default: use robust detection
-    robust_nice_detection = True
+    # Default: no specific words needed
+    robust_nice_detection = False  # no longer used
     
     return {
         "prep_model": prep_model,
@@ -50,7 +42,6 @@ def get_default_config(prep_model, prep_dir=None, all_prompt_types=None):
         "all_dirs_joined": all_dirs_joined,
         "model_name": model_name,
         "output_dir": output_dir,
-        "specific_words": specific_words,
         "robust_nice_detection": robust_nice_detection,
     }
 
@@ -63,73 +54,28 @@ def load_activations(pt_file):
     """Loads a single .pt file."""
     return torch.load(pt_file)
 
-# --- "Nice" token detection ---
-def find_nice_tokens_subword(decoded_tokens, specific_words):
-    nice_mask = [False] * len(decoded_tokens)
-    word_buffer = []
-    word_start_idx = 0
-
-    def flush_word(buffer, start_idx, end_idx):
-        merged = "".join(buffer).replace("▁", "").replace("Ġ", "").lower()
-        merged_clean = re.sub(r"\W+", "", merged)
-        for w in specific_words:
-            w_clean = re.sub(r"\W+", "", w.lower())
-            if merged_clean == w_clean:
-                for idx in range(start_idx, end_idx):
-                    nice_mask[idx] = True
-
-    def is_wordish(tok):
-        return len(re.sub(r"\W+", "", tok)) > 0
-
-    for i, tok in enumerate(decoded_tokens):
-        if is_wordish(tok):
-            word_buffer.append(tok)
-        else:
-            if word_buffer:
-                flush_word(word_buffer, word_start_idx, i)
-                word_buffer = []
-            word_start_idx = i + 1
-
-    if word_buffer:
-        flush_word(word_buffer, word_start_idx, len(decoded_tokens))
-    return nice_mask
-
-def identify_token_ranges_robust(token_ids, tokenizer, specific_words):
+def identify_token_ranges(token_ids, tokenizer):
+    """
+    Identifies token ranges based on the first occurrence of a colon.
+    Returns:
+      - decoded_tokens: list of tokens.
+      - nice_mask: a mask (list of False) since no nice token detection is performed.
+      - math_mask: a mask that is True for tokens after the first colon.
+      - colon_pos: the index of the first colon (or None if not found).
+    """
     decoded_tokens = tokenizer.convert_ids_to_tokens(token_ids, skip_special_tokens=False)
     colon_positions = [i for i, tok in enumerate(decoded_tokens) if ":" in tok]
     first_colon = colon_positions[0] if colon_positions else None
-    nice_mask = find_nice_tokens_subword(decoded_tokens, specific_words)
+    nice_mask = [False] * len(decoded_tokens)
     math_mask = [False] * len(decoded_tokens)
     if first_colon is not None and first_colon < len(decoded_tokens) - 1:
-        for idx in range(first_colon+1, len(decoded_tokens)):
+        for idx in range(first_colon + 1, len(decoded_tokens)):
             math_mask[idx] = True
     return {
         "decoded_tokens": decoded_tokens,
         "nice_mask": nice_mask,
         "math_mask": math_mask,
         "colon_pos": first_colon
-    }
-
-def identify_token_ranges_naive(token_ids, tokenizer, specific_words):
-    decoded_tokens = tokenizer.convert_ids_to_tokens(token_ids, skip_special_tokens=False)
-    decoded_tokens_lower = [t.lower() for t in decoded_tokens]
-    colon_positions = [i for i, tok in enumerate(decoded_tokens) if ":" in tok]
-    first_colon_pos = colon_positions[0] if colon_positions else None
-    nice_mask = [False] * len(decoded_tokens)
-    for i, tok_l in enumerate(decoded_tokens_lower):
-        for w in specific_words:
-            if w in tok_l:
-                nice_mask[i] = True
-                break
-    math_mask = [False] * len(decoded_tokens)
-    if first_colon_pos is not None:
-        for i in range(first_colon_pos+1, len(decoded_tokens)):
-            math_mask[i] = True
-    return {
-        "decoded_tokens": decoded_tokens,
-        "nice_mask": nice_mask,
-        "math_mask": math_mask,
-        "colon_pos": first_colon_pos
     }
 
 def make_prompt_task_masks(colon_pos, seq_len):
@@ -189,7 +135,6 @@ def run_attention_extraction(prep_model=None,
                              prep_dir=None,
                              all_prompt_types=None,
                              output_dir=None,
-                             specific_words_csv=None,
                              robust_nice_detection=True,
                              tokenizer=None):
     """
@@ -202,8 +147,7 @@ def run_attention_extraction(prep_model=None,
            "explained insulting nicer1k normal1k pure reduced1k shortest1k urgent1k"
       - output_dir: directory to save attention analysis outputs. Default:
            "output/attention/<prep_model>/<joined_prompt_types>"
-      - specific_words_csv: path to CSV file with nice words. Default: "analyses/specific_words.csv"
-      - robust_nice_detection: bool. If True, use robust subword detection.
+      - robust_nice_detection: bool. (Ignored in this version)
       - tokenizer: a Hugging Face tokenizer. If None, one is loaded using the model name.
     
     The function processes all .pt files found in each prompt type directory, computes attention stats,
@@ -215,16 +159,11 @@ def run_attention_extraction(prep_model=None,
     # Get the default configuration
     config = get_default_config(prep_model, prep_dir, all_prompt_types)
     
-    # Override output_dir and specific_words_csv if provided
+    # Override output_dir if provided
     if output_dir is not None:
         config["output_dir"] = output_dir
-    if specific_words_csv is not None:
-        config["specific_words_csv"] = specific_words_csv
-        if os.path.exists(specific_words_csv):
-            with open(specific_words_csv, "r", encoding="utf-8") as f:
-                config["specific_words"] = [line.strip() for line in f if line.strip()]
     
-    config["robust_nice_detection"] = robust_nice_detection
+    config["robust_nice_detection"] = robust_nice_detection  # (no longer used)
     
     # Use the provided tokenizer if available; otherwise, load it.
     if tokenizer is None:
@@ -236,10 +175,8 @@ def run_attention_extraction(prep_model=None,
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     
-    # Choose detection function
-    identify_fn = (lambda token_ids: identify_token_ranges_robust(token_ids, tokenizer, config["specific_words"])) \
-                  if robust_nice_detection else \
-                  (lambda token_ids: identify_token_ranges_naive(token_ids, tokenizer, config["specific_words"]))
+    # Use the simplified detection function
+    identify_fn = lambda token_ids: identify_token_ranges(token_ids, tokenizer)
     
     # Prepare output directory
     os.makedirs(config["output_dir"], exist_ok=True)
@@ -375,10 +312,8 @@ if __name__ == "__main__":
                         help="Space-separated list of prompt types")
     parser.add_argument("--output_dir", type=str, default=None,
                         help="Directory to save attention analysis outputs")
-    parser.add_argument("--specific_words_csv", type=str, default="analyses/specific_words.csv",
-                        help="Path to CSV file with nice words")
     parser.add_argument("--robust_nice_detection", type=lambda s: s.lower() in ['true', '1', 'yes'],
-                        default=True, help="Whether to use robust nice token detection (True/False)")
+                        default=True, help="(Ignored) Whether to use robust nice token detection (True/False)")
     args = parser.parse_args()
 
     run_attention_extraction(
@@ -386,7 +321,6 @@ if __name__ == "__main__":
         prep_dir=args.prep_dir,
         all_prompt_types=args.all_prompt_types,
         output_dir=args.output_dir,
-        specific_words_csv=args.specific_words_csv,
         robust_nice_detection=args.robust_nice_detection,
         tokenizer=None  # Will load a tokenizer if not provided
     )
