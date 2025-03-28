@@ -1,49 +1,12 @@
 #!/usr/bin/env python
 import os
+import glob
 import re
 import torch
-import glob
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from transformers import AutoTokenizer
-
-##############################################################################
-# Helper functions & configuration defaults
-##############################################################################
-def get_default_config(prep_model, prep_dir=None, all_prompt_types=None):
-    # Use provided prep_dir or default to relative path.
-    if prep_dir is None:
-        prep_dir = os.path.join("output", "extractions", prep_model)
-    # Use provided prompt types if any; otherwise, default to hard-coded string.
-    if all_prompt_types is None:
-        all_prompt_types = "explained insulting nicer1k normal1k pure reduced1k shortest1k urgent1k"
-    # Split the prompt types string into a list.
-    all_types_list = [d.strip() for d in re.split(r"[, \n]+", all_prompt_types) if d.strip()]
-    
-    # Build list of directories using the (possibly absolute) prep_dir.
-    all_dirs_list = [os.path.join(prep_dir, d) for d in all_types_list]
-    
-    # Create underscore-separated string for output naming
-    all_dirs_joined = "_".join(all_types_list)
-    model_name = "google/" + prep_model
-    output_dir = os.path.join("output", "attention", prep_model, all_dirs_joined)
-    os.makedirs(output_dir, exist_ok=True)
-    
-    # Default: no specific words needed
-    robust_nice_detection = False  # no longer used
-    
-    return {
-        "prep_model": prep_model,
-        "prep_dir": prep_dir,
-        "all_prompt_types": all_prompt_types,
-        "all_types_list": all_types_list,
-        "all_dirs_list": all_dirs_list,
-        "all_dirs_joined": all_dirs_joined,
-        "model_name": model_name,
-        "output_dir": output_dir,
-        "robust_nice_detection": robust_nice_detection,
-    }
 
 def get_pt_files(directory):
     """Return sorted list of .pt files in a directory."""
@@ -57,9 +20,10 @@ def load_activations(pt_file):
 def identify_token_ranges(token_ids, tokenizer):
     """
     Identifies token ranges based on the first occurrence of a colon.
-    Returns:
+    
+    Returns a dict with:
       - decoded_tokens: list of tokens.
-      - nice_mask: a mask (list of False) since no nice token detection is performed.
+      - nice_mask: a mask (all False) since no special detection is performed.
       - math_mask: a mask that is True for tokens after the first colon.
       - colon_pos: the index of the first colon (or None if not found).
     """
@@ -128,71 +92,46 @@ def extract_per_layer_head_stats(attentions, input_ids):
                 results.append(row)
     return results
 
-##############################################################################
-# Main function: run_attention_extraction
-##############################################################################
-def run_attention_extraction(prep_model=None,
-                             prep_dir=None,
-                             all_prompt_types=None,
-                             output_dir=None,
-                             robust_nice_detection=True,
-                             tokenizer=None):
+def run_attention_extraction(tokenizer,
+                             extraction_base_dir="c_inference/extractions/",
+                             prompt_types="normal nicer urgent",
+                             output_dir="output/attention"):
     """
-    Runs the full attention extraction analysis. Configuration parameters can be overridden.
-    
+    Runs the full attention extraction analysis.
+
     Parameters:
-      - prep_model: string, e.g. "gemma-2-9b-it". Default: "gemma-2-9b-it".
-      - prep_dir: directory where extraction .pt files are located. Default: "output/extractions/<prep_model>".
-      - all_prompt_types: space-separated string of prompt type names. Default:
-           "explained insulting nicer1k normal1k pure reduced1k shortest1k urgent1k"
-      - output_dir: directory to save attention analysis outputs. Default:
-           "output/attention/<prep_model>/<joined_prompt_types>"
-      - robust_nice_detection: bool. (Ignored in this version)
-      - tokenizer: a Hugging Face tokenizer. If None, one is loaded using the model name.
+      - tokenizer: a preloaded Hugging Face tokenizer.
+      - extraction_base_dir: Base directory containing extraction subdirectories.
+           Default is "c_inference/extractions/".
+      - prompt_types: Space-separated string of directory names to process.
+           Default is "normal nicer urgent".
+      - output_dir: Directory to save attention analysis outputs.
+           The final output directory will be: output_dir/<joined_prompt_types>
     
-    The function processes all .pt files found in each prompt type directory, computes attention stats,
+    The function processes all .pt files in each extraction subdirectory, computes attention stats,
     saves CSV summaries and boxplots, and prints summary statistics.
     """
-    # Set defaults if not provided
-    if prep_model is None:
-        prep_model = "gemma-2-9b-it"
-    # Get the default configuration
-    config = get_default_config(prep_model, prep_dir, all_prompt_types)
+    # Build list of prompt types and corresponding directories.
+    prompt_types_list = [pt.strip() for pt in prompt_types.split() if pt.strip()]
+    all_dirs_list = [os.path.join(extraction_base_dir, pt) for pt in prompt_types_list]
+    # Build output directory: join output_dir with the prompt type names.
+    joined_prompts = "_".join(prompt_types_list)
+    final_output_dir = os.path.join(output_dir, joined_prompts)
+    os.makedirs(final_output_dir, exist_ok=True)
     
-    # Override output_dir if provided
-    if output_dir is not None:
-        config["output_dir"] = output_dir
-    
-    config["robust_nice_detection"] = robust_nice_detection  # (no longer used)
-    
-    # Use the provided tokenizer if available; otherwise, load it.
-    if tokenizer is None:
-        tokenizer = AutoTokenizer.from_pretrained(
-            config["model_name"],
-            use_auth_token=True,
-            local_files_only=True
-        )
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
-    
-    # Use the simplified detection function
+    # Use the simplified detection function.
     identify_fn = lambda token_ids: identify_token_ranges(token_ids, tokenizer)
     
-    # Prepare output directory
-    os.makedirs(config["output_dir"], exist_ok=True)
-    
-    # Process each prompt type directory
     all_attention_records = []
     all_plh_records = []
-    for ddir in config["all_dirs_list"]:
+    for ddir in all_dirs_list:
         pt_files = get_pt_files(ddir)
-        prompt_type = os.path.basename(ddir.rstrip("/"))
+        prompt_type = os.path.basename(os.path.normpath(ddir))
         print(f"Found {len(pt_files)} .pt files in: {ddir} (prompt_type='{prompt_type}')")
         
-        # Process files in this directory
         for pt_file in pt_files:
             data = load_activations(pt_file)
-            # AGGREGATE attention stats
+            # Aggregate attention stats.
             batch_stats = extract_attention_stats(data["attentions"], data["input_ids"])
             B, S = batch_stats["avg_layers"].shape
             for i in range(B):
@@ -214,7 +153,7 @@ def run_attention_extraction(prep_model=None,
                     "frac_prompt": float(frac_prompt),
                     "frac_task": float(frac_task),
                 })
-            # PER-LAYER-HEAD stats
+            # Per-layer-head stats.
             plh_data = extract_per_layer_head_stats(data["attentions"], data["input_ids"])
             for row in plh_data:
                 b_idx = row["batch_idx"]
@@ -239,46 +178,49 @@ def run_attention_extraction(prep_model=None,
                     "frac_task": float(frac_task),
                 })
     
-    # Build a DataFrame from aggregated records
+    # Build aggregated DataFrame and save CSV.
     df_all = pd.DataFrame(all_attention_records)
     agg_mean = df_all.groupby("prompt_type")[["frac_prompt", "frac_task"]].mean()
     print("=== Average fraction of attention on prompt vs. task portion ===")
     print(agg_mean)
-    agg_csv = os.path.join(config["output_dir"], "prompt_task_fraction_aggregate.csv")
+    agg_csv = os.path.join(final_output_dir, "prompt_task_fraction_aggregate.csv")
     agg_mean.to_csv(agg_csv)
     print(f"Saved fraction summary CSV to: {agg_csv}")
     
-    # Boxplots for aggregated stats
+    # Boxplot for fraction on prompt.
     plt.figure()
     df_all.boxplot(column="frac_prompt", by="prompt_type", grid=False)
     plt.suptitle("")
     plt.title("Fraction of Attention on Prompt Portion")
     plt.ylabel("Fraction (0~1)")
     plt.xlabel("Prompt Type")
-    boxplot_prompt = os.path.join(config["output_dir"], "boxplot_frac_prompt.png")
+    boxplot_prompt = os.path.join(final_output_dir, "boxplot_frac_prompt.png")
     plt.savefig(boxplot_prompt)
+    plt.show()  # To display inline in notebooks
     plt.close()
     
+    # Boxplot for fraction on task.
     plt.figure()
     df_all.boxplot(column="frac_task", by="prompt_type", grid=False)
     plt.suptitle("")
     plt.title("Fraction of Attention on Task Portion")
     plt.ylabel("Fraction (0~1)")
     plt.xlabel("Prompt Type")
-    boxplot_task = os.path.join(config["output_dir"], "boxplot_frac_task.png")
+    boxplot_task = os.path.join(final_output_dir, "boxplot_frac_task.png")
     plt.savefig(boxplot_task)
+    plt.show()  # Display inline
     plt.close()
     
-    # Per-layer-head stats
+    # Per-layer-head stats.
     df_plh = pd.DataFrame(all_plh_records).drop_duplicates()
     plh_mean = df_plh.groupby(["prompt_type", "layer"])[["frac_prompt", "frac_task"]].mean()
     print("=== Per-layer average fraction of attention on prompt vs. task ===")
     print(plh_mean)
-    plh_csv = os.path.join(config["output_dir"], "prompt_task_fraction_perlayer.csv")
+    plh_csv = os.path.join(final_output_dir, "prompt_task_fraction_perlayer.csv")
     plh_mean.to_csv(plh_csv)
     print(f"Saved per-layer fraction CSV to: {plh_csv}")
     
-    # For each prompt_type, boxplot of frac_prompt by layer
+    # For each prompt_type, create boxplots of frac_prompt by layer.
     for pt in df_plh["prompt_type"].unique():
         sub = df_plh[df_plh["prompt_type"] == pt]
         if not sub.empty:
@@ -288,39 +230,36 @@ def run_attention_extraction(prep_model=None,
             plt.title(f"Fraction of Attention on Prompt vs. Layer - {pt}")
             plt.ylabel("Fraction (0~1)")
             plt.xlabel("Layer")
-            boxplot_pl = os.path.join(config["output_dir"], f"boxplot_perlayer_frac_prompt_{pt}.png")
+            boxplot_pl = os.path.join(final_output_dir, f"boxplot_perlayer_frac_prompt_{pt}.png")
             plt.savefig(boxplot_pl)
+            plt.show()  # Display inline
             plt.close()
     
-    print("All plots and CSVs saved to:", config["output_dir"])
+    print("All plots and CSVs saved to:", final_output_dir)
     print("Done!")
 
-##############################################################################
-# Command-line interface for HPC usage
-##############################################################################
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(
         description="Run attention extraction analysis from .pt activation files."
     )
-    parser.add_argument("--prep_model", type=str, default="gemma-2-9b-it",
-                        help="Model identifier (e.g., gemma-2-9b-it)")
-    parser.add_argument("--prep_dir", type=str, default=None,
-                        help="Directory where extraction .pt files are located")
-    parser.add_argument("--all_prompt_types", type=str,
-                        default="explained insulting nicer1k normal1k pure reduced1k shortest1k urgent1k",
-                        help="Space-separated list of prompt types")
-    parser.add_argument("--output_dir", type=str, default=None,
+    parser.add_argument("--extraction_base_dir", type=str, default="c_inference/extractions/",
+                        help="Base directory where extraction subdirectories are located")
+    parser.add_argument("--prompt_types", type=str, default="normal nicer urgent",
+                        help="Space-separated list of prompt type directory names")
+    parser.add_argument("--output_dir", type=str, default="output/attention",
                         help="Directory to save attention analysis outputs")
-    parser.add_argument("--robust_nice_detection", type=lambda s: s.lower() in ['true', '1', 'yes'],
-                        default=True, help="(Ignored) Whether to use robust nice token detection (True/False)")
     args = parser.parse_args()
 
+    # In SLURM or command-line usage, load a tokenizer externally and pass its name
+    # For now, loading one:
+    tokenizer = AutoTokenizer.from_pretrained("google/gemma-2-9b-it", use_auth_token=True, local_files_only=True)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
     run_attention_extraction(
-        prep_model=args.prep_model,
-        prep_dir=args.prep_dir,
-        all_prompt_types=args.all_prompt_types,
-        output_dir=args.output_dir,
-        robust_nice_detection=args.robust_nice_detection,
-        tokenizer=None  # Will load a tokenizer if not provided
+        tokenizer=tokenizer,
+        extraction_base_dir=args.extraction_base_dir,
+        prompt_types=args.prompt_types,
+        output_dir=args.output_dir
     )
