@@ -1,0 +1,24 @@
+#!/bin/bash
+#PBS -N instruct_tuned_inf
+#PBS -l select=1:ncpus=8:ngpus=1:mem=16gb
+#PBS -l walltime=4:00:00
+#PBS -o logs/instruct_tuned_inf.out
+#PBS -e logs/instruct_tuned_inf.err
+
+cd $PBS_O_WORKDIR
+
+echo "$(date "+%Y-%m-%d %H:%M:%S") - xs_pure1k_extraction_inf started" >> $HOME/times.log
+nvidia-smi --query-gpu=name --format=csv,noheader
+
+CONTAINER_PATH="$PBS_O_WORKDIR/containers/container.sif"
+SCRIPT_PATH="/workspace/c_inference/run_scripts/instruct_tuned_inf.py"
+JSON_FILE="/workspace/a_data/maths.json"
+PROMPT_KEY="normal"
+OUT_DIR="/workspace/c_inference/extractions/$PROMPT_KEY"
+
+singularity exec --nv -B "$HOME/ParaphrX:/workspace" "$CONTAINER_PATH" \
+    python "$SCRIPT_PATH" \
+    --output_dir "$OUT_DIR" \
+    --batch_size 128
+
+echo "$(date "+%Y-%m-%d %H:%M:%S") - xs_pure1k_extraction_inf finished" >> $HOME/times.log
